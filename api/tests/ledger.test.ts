@@ -522,3 +522,28 @@ describe('pending payments cannot overpay', () => {
     expect(await balancesOf(frank, group.id)).toEqual({ [frankM]: 0, [daveM]: 0 });
   });
 });
+
+describe('payments are capped by what the receiver is owed', () => {
+  it('rejects paying someone more than they are owed, even when the payer owes more', async () => {
+    const { group, myMemberId: frankM } = await createGroup(frank, 'Receiver cap');
+    const x = (await frank.post(`/api/groups/${group.id}/members`, { displayName: 'X' }).expect(201)).body.member.id;
+    const y = (await frank.post(`/api/groups/${group.id}/members`, { displayName: 'Y' }).expect(201)).body.member.id;
+    const only = (payer: string, amount: number, debtor: string) => ({
+      title: 'For Y',
+      amount,
+      splitType: 'exact',
+      payers: [{ memberId: payer, amount }],
+      splits: [{ memberId: debtor, amount }],
+    });
+    await frank.post(`/api/groups/${group.id}/expenses`, only(x, 60000, y)).expect(201); // X is owed 600
+    await frank.post(`/api/groups/${group.id}/expenses`, only(frankM, 10000, y)).expect(201); // Frank is owed 100
+
+    // Y owes 700 in total, but Frank is only owed 100.
+    const pay = (amount: number) =>
+      frank.post(`/api/groups/${group.id}/settlements`, { fromMemberId: y, toMemberId: frankM, amount, method: 'cash' });
+    await pay(20000).expect(400);
+    const ok = await pay(10000).expect(201);
+    expect(ok.body.settlement.status).toBe('confirmed'); // Frank is the receiver and recorded it
+    expect(await balancesOf(frank, group.id)).toEqual({ [frankM]: 0, [x]: 60000, [y]: -60000 });
+  });
+});

@@ -14,7 +14,7 @@ import {
   computeGroupBalances,
   loadMembers,
   memberIdField,
-  pendingOutgoing,
+  pendingFor,
   requireMembership,
 } from '../lib/groupLedger.js';
 
@@ -61,15 +61,21 @@ groupSettlementsRouter.post('/', async (req, res) => {
     throw new HttpError(403, 'Only the payer or the receiver can record this payment');
   }
 
-  // Up to what `from` owes on confirmed balances, minus payments of theirs still waiting for confirmation,
-  // so several pending payments can't add up to more than the debt.
-  const [{ byMember }, pending] = await Promise.all([
+  // Capped by both sides, on confirmed balances minus payments still waiting for confirmation:
+  // no more than `from` still owes, and no more than `to` is still owed (paying someone more than they're owed
+  // would flip them into debt).
+  const [{ byMember }, fromPending, toPending] = await Promise.all([
     computeGroupBalances(groupId, members),
-    pendingOutgoing(groupId, fromMemberId),
+    pendingFor(groupId, fromMemberId),
+    pendingFor(groupId, toMemberId),
   ]);
-  const owes = Math.max(0, -(byMember[fromMemberId] ?? 0) - pending);
+  const owes = Math.max(0, -(byMember[fromMemberId] ?? 0) - fromPending.out);
+  const isOwed = Math.max(0, (byMember[toMemberId] ?? 0) - toPending.in);
   if (amount > owes) {
     throw new HttpError(400, `Amount is more than ${from.displayName} still owes (${owes}, after pending payments)`);
+  }
+  if (amount > isOwed) {
+    throw new HttpError(400, `Amount is more than ${to.displayName} is still owed (${isOwed}, after pending payments)`);
   }
 
   // Confirmed at once if the receiver records it, or the receiver has no account to confirm with.
