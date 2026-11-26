@@ -8,7 +8,15 @@ import { UserModel } from '../models/User.js';
 import { currentUserId, requireAuth } from '../middleware/auth.js';
 import { HttpError } from '../lib/httpError.js';
 import { objectId, parseIdOr404 } from '../lib/ids.js';
-import { assertMembers, computeGroupBalances, loadMembers, memberIdField, requireMembership } from '../lib/groupLedger.js';
+import {
+  assertLegsStillOwed,
+  assertMembers,
+  computeGroupBalances,
+  loadMembers,
+  memberIdField,
+  pendingOutgoing,
+  requireMembership,
+} from '../lib/groupLedger.js';
 
 const MAX_SHARED_GROUPS = 50; // settle-with looks at no more than 50 shared groups
 const MAX_MY_GROUPS = 500; // bound on the "my memberships" scan used to find shared groups
@@ -53,10 +61,16 @@ groupSettlementsRouter.post('/', async (req, res) => {
     throw new HttpError(403, 'Only the payer or the receiver can record this payment');
   }
 
-  // Up to what `from` owes, using confirmed balances only.
-  const { byMember } = await computeGroupBalances(groupId, members);
-  const owes = Math.max(0, -(byMember[fromMemberId] ?? 0));
-  if (amount > owes) throw new HttpError(400, `Amount is more than ${from.displayName} owes (${owes})`);
+  // Up to what `from` owes on confirmed balances, minus payments of theirs still waiting for confirmation,
+  // so several pending payments can't add up to more than the debt.
+  const [{ byMember }, pending] = await Promise.all([
+    computeGroupBalances(groupId, members),
+    pendingOutgoing(groupId, fromMemberId),
+  ]);
+  const owes = Math.max(0, -(byMember[fromMemberId] ?? 0) - pending);
+  if (amount > owes) {
+    throw new HttpError(400, `Amount is more than ${from.displayName} still owes (${owes}, after pending payments)`);
+  }
 
   // Confirmed at once if the receiver records it, or the receiver has no account to confirm with.
   const confirmed = myMemberId === toMemberId || !to.userId;
@@ -113,6 +127,13 @@ settlementsRouter.get('/pending', async (req, res) => {
 function decide(status: 'confirmed' | 'rejected') {
   return async (req: Request<{ id: string }>, res: import('express').Response) => {
     const id = parseIdOr404(req.params.id, 'Settlement');
+    if (status === 'confirmed') {
+      const current = await SettlementModel.findOne({ _id: id, toUserId: currentUserId(req), status: 'pending' })
+        .select('legs')
+        .lean();
+      if (!current) throw new HttpError(404, 'Settlement not found');
+      await assertLegsStillOwed(current.legs); // balances may have moved since it was recorded
+    }
     const settlement = await SettlementModel.findOneAndUpdate(
       { _id: id, toUserId: currentUserId(req), status: 'pending' },
       { $set: { status, decidedAt: new Date() } },
@@ -202,6 +223,17 @@ settleWithRouter.post('/:userId', async (req, res) => {
   const { method, note } = settleWithSchema.parse(req.body);
   const { me, other, legs, direction, netAmount } = await buildSettleWith(req);
   if (legs.length === 0) throw new HttpError(400, 'Nothing to settle');
+
+  // The legs come from confirmed balances only, so a payment already waiting between us would be counted twice.
+  // Two equality queries (each served by the toUserId+status index) instead of a $or, which sanitizeFilter
+  // would need wrapping for.
+  const pendingBetweenUs = await Promise.all([
+    SettlementModel.exists({ toUserId: other.id, status: 'pending', fromUserId: me }),
+    SettlementModel.exists({ toUserId: me, status: 'pending', fromUserId: other.id }),
+  ]);
+  if (pendingBetweenUs.some(Boolean)) {
+    throw new HttpError(409, 'A payment between you two is still waiting for confirmation. Confirm or reject it first.');
+  }
 
   // they_pay: I'm the receiver, so it counts at once. i_pay / even: pending until they confirm.
   const theyPay = direction === 'they_pay';

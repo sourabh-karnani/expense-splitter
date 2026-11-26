@@ -81,6 +81,36 @@ export async function computeGroupBalances(groupId: string, preloadedMembers?: M
   return { members, balances, suggestedPayments, byMember };
 }
 
+/**
+ * Sum of PENDING settlement legs in this group that `memberId` is paying. Counted against what they owe when a
+ * new payment is recorded, so several pending payments can't add up to more than the debt.
+ */
+export async function pendingOutgoing(groupId: string, memberId: string): Promise<number> {
+  const pending = await SettlementModel.find({ groupIds: groupId, status: 'pending' }).select('legs').lean();
+  return pending
+    .flatMap((s) => s.legs)
+    .filter((l) => String(l.groupId) === groupId && String(l.fromMemberId) === memberId)
+    .reduce((sum, l) => sum + l.amount, 0);
+}
+
+/**
+ * Re-checks every leg against the CURRENT confirmed balances: the payer of each leg must still owe at least the
+ * leg amount in that group. Balances can change between recording and confirming (other payments, edited
+ * expenses), so this runs right before a settlement is confirmed. Throws 409 if a leg would overpay.
+ */
+export async function assertLegsStillOwed(legs: { groupId: unknown; fromMemberId: unknown; amount: number }[]) {
+  const groupIds = [...new Set(legs.map((l) => String(l.groupId)))];
+  const balances = new Map(
+    await Promise.all(groupIds.map(async (g) => [g, (await computeGroupBalances(g)).byMember] as const)),
+  );
+  for (const leg of legs) {
+    const owes = Math.max(0, -(balances.get(String(leg.groupId))?.[String(leg.fromMemberId)] ?? 0));
+    if (leg.amount > owes) {
+      throw new HttpError(409, 'Balances changed since this payment was recorded and it would now overpay. Reject it and record a new one.');
+    }
+  }
+}
+
 // ---- Invite codes ----
 
 const BASE62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

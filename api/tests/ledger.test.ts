@@ -490,3 +490,35 @@ describe('security', () => {
     await alice.get(`/api/groups/${other.group.id}`).expect(404);
   });
 });
+
+describe('pending payments cannot overpay', () => {
+  it('counts pending payments when recording, blocks settle-with while one is pending, and re-checks on confirm', async () => {
+    const { group, myMemberId: frankM } = await createGroup(frank, 'Overpay guard');
+    await join(dave, group.invite.code).expect(200);
+    const daveM = await memberIdOf(dave, group.id);
+    const created = await frank
+      .post(`/api/groups/${group.id}/expenses`, equalExpense('Dinner', 100000, frankM, [frankM, daveM]))
+      .expect(201);
+    const pay = (amount: number) =>
+      dave.post(`/api/groups/${group.id}/settlements`, { fromMemberId: daveM, toMemberId: frankM, amount, method: 'cash' });
+
+    // Dave owes 50000. 30000 pending leaves 20000 he can still record.
+    const first = await pay(30000).expect(201);
+    expect(first.body.settlement.status).toBe('pending');
+    await pay(30000).expect(400);
+
+    // Settle-with legs come from confirmed balances, so it must wait for the pending payment.
+    await dave.post(`/api/settle-with/${frank.id}`, { method: 'upi' }).expect(409);
+
+    await pay(20000).expect(201);
+
+    // The expense is deleted before Frank confirms: Dave owes nothing now, so confirming would overpay.
+    await frank.del(`/api/groups/${group.id}/expenses/${created.body.expense.id}?version=1`).expect(204);
+    await frank.post(`/api/settlements/${first.body.settlement.id}/confirm`).expect(409);
+    const still = await SettlementModel.findById(first.body.settlement.id).lean();
+    expect(still?.status).toBe('pending');
+
+    await frank.post(`/api/settlements/${first.body.settlement.id}/reject`).expect(200);
+    expect(await balancesOf(frank, group.id)).toEqual({ [frankM]: 0, [daveM]: 0 });
+  });
+});
