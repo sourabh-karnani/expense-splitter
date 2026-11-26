@@ -12,8 +12,11 @@ Stack: Node 22, Express 5 + TypeScript (run with tsx), Mongoose on local MongoDB
 - Validate every request body and query with Zod. Use `z.strictObject` for bodies so unknown fields are rejected.
 - Take the user id only from `currentUserId(req)` (set by `requireAuth`), never from the body, query or params.
 - Scope every read, update and delete of user data by owner: `{ _id: id, ownerId: currentUserId(req) }`. Not found or not yours → 404.
+- Group data (groups, members, expenses, settlements) is shared, so it is scoped by **membership** instead: load the caller's GroupMember for `groupId` first (none → 404), and always filter child documents by that `groupId`. Payers, split members and settlement parties must be members of the same group.
+- Money is integer paise. Never use floats for amounts.
+- Multi-part writes must be a single document update (standalone MongoDB has no transactions). Use conditional updates (`version`, `status: 'pending'`, `memberCount < 20`) to prevent races.
 - Return data only through an explicit DTO function (like `toNoteDTO`). Never return raw Mongoose documents.
-- Lists use cursor pagination on `_id`: default limit 20, max 50. Add an index that matches every new query.
+- Lists use cursor pagination on `_id`: default limit 20, max 50. Add an index that matches every new query. Exceptions: group members (capped at 20) and the balance computation, which reads all of a group's expenses.
 - Throw `HttpError(status, message)` for expected errors. `errorHandler` formats all responses as `{ error: { message } }`.
 - `sanitizeFilter` is on: query operators written in code must be wrapped in `mongoose.trusted(...)`.
 - No secrets in code. Read configuration from `api/src/env.ts`.
