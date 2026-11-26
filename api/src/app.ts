@@ -7,6 +7,9 @@ import mongoose from 'mongoose';
 import { env } from './env.js';
 import { authRouter } from './routes/auth.js';
 import { notesRouter } from './routes/notes.js';
+import { groupsRouter, joinRouter } from './routes/groups.js';
+import { expensesRouter } from './routes/expenses.js';
+import { groupSettlementsRouter, settleWithRouter, settlementsRouter } from './routes/settlements.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 
 export function createApp() {
@@ -24,6 +27,13 @@ export function createApp() {
 
   app.use('/api/auth', authRouter);
   app.use('/api/notes', notesRouter);
+  // Nested group routers first (mergeParams gives them :gid), then the group router itself.
+  app.use('/api/groups/:gid/expenses', expensesRouter);
+  app.use('/api/groups/:gid/settlements', groupSettlementsRouter);
+  app.use('/api/groups', groupsRouter);
+  app.use('/api/join', joinRouter);
+  app.use('/api/settlements', settlementsRouter);
+  app.use('/api/settle-with', settleWithRouter);
 
   app.use(notFound);
   app.use(errorHandler);

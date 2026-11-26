@@ -61,7 +61,7 @@ GET/POST  /api/groups/:gid/expenses         PATCH/DELETE /api/groups/:gid/expens
 GET       /api/groups/:gid/expenses/:eid/history
 GET       /api/groups/:gid/balances         → { balances, suggestedPayments }
 POST      /api/groups/:gid/settlements      (one group, partial ok)
-GET       /api/settlements?status=pending   (mine to confirm)
+GET       /api/settlements/pending          (mine to confirm)
 POST      /api/settlements/:id/confirm|reject (receiver only, conditional on status=pending)
 GET/POST  /api/settle-with/:userId          (cross-group pairwise preview / create batch)
 ```
