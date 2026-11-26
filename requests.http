@@ -1,0 +1,43 @@
+@base = http://localhost:4000/api
+
+### Health
+GET {{base}}/health
+
+### Register (the session cookie is kept for the next requests)
+POST {{base}}/auth/register
+Content-Type: application/json
+
+{ "email": "demo@example.com", "name": "Demo", "password": "demo-password-1" }
+
+### Log in
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "demo@example.com", "password": "demo-password-1" }
+
+### Who am I
+GET {{base}}/auth/me
+
+### Create a note
+POST {{base}}/notes
+Content-Type: application/json
+
+{ "title": "First note", "body": "Hello" }
+
+### List notes
+GET {{base}}/notes?limit=20
+
+### Mass assignment attempt (expect 400)
+POST {{base}}/notes
+Content-Type: application/json
+
+{ "title": "x", "ownerId": "000000000000000000000000" }
+
+### Query operator injection attempt (expect 400)
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": { "$ne": null }, "password": "x" }
+
+### Log out
+POST {{base}}/auth/logout
