@@ -27,7 +27,7 @@ Rounding is deterministic: leftover paise go to members in join order, so splits
 
 ```bash
 npm run dev        # API on http://localhost:4000, web app on http://localhost:5173
-npm test           # API tests (use the separate ghl_test database)
+npm test           # API tests (use the separate expense_splitter_test database)
 npm run typecheck  # API and web
 ```
 

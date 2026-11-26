@@ -1,5 +1,5 @@
 {
-  "name": "ghl",
+  "name": "expense-splitter",
   "private": true,
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"npm --prefix api run dev\" \"npm --prefix web run dev\"",

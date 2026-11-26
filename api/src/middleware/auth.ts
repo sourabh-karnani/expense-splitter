@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { env, isProd } from '../env.js';
 import { HttpError } from '../lib/httpError.js';
 
-export const SESSION_COOKIE = 'ghl_session';
+export const SESSION_COOKIE = 'splitter_session';
 const SESSION_MS = 60 * 60 * 1000; // 1 hour
 
 // The JWT lives in an httpOnly cookie, so page JavaScript (and any XSS) can't read it.
